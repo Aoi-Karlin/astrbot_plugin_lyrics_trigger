@@ -36,7 +36,7 @@ class LyricsCatcher(Star):
         self.trigger_probability = self.config.get("trigger_probability", 100)
         
         # 初始化缓存 - 使用正确的路径获取方式
-        data_path = get_astrbot_data_path()
+        data_path = Path(get_astrbot_data_path())
         self.cache_dir = data_path / "plugin_data" / "lyrics_catcher"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.cache_file = self.cache_dir / "lyrics_cache.json"
