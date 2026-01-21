@@ -1,9 +1,115 @@
-# helloworld
+# AstrBot 接歌词插件
 
-AstrBot 插件模板
+自动检测消息中的歌词，通过网易云音乐第三方 API 搜索歌曲并接龙。
 
-A template plugin for AstrBot plugin feature
+## 功能特性
 
-# 支持
+- 🎵 自动检测消息中的歌词片段
+- 🔍 使用网易云音乐 API 搜索歌曲
+- 💾 智能缓存机制，减少重复请求
+- 🎲 可配置触发概率
+- 📊 统计信息查看
 
-- [插件开发文档](https://docs.astrbot.app/dev/star/plugin-new.html)
+## 安装说明
+
+1. 将插件文件放入 AstrBot 的插件目录
+2. 重启 AstrBot 或使用热重载功能
+3. 在 WebUI 中配置网易云音乐 API 地址
+
+## 配置项
+
+### API 地址配置
+
+你需要部署 [NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi) 项目，或使用已有的公开 API。
+
+### 配置参数说明
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| api_base_url | string | - | 网易云音乐 API 地址（必填） |
+| min_match_length | int | 5 | 最小匹配长度，低于此长度不触发 |
+| max_cache_size | int | 1000 | 最大缓存歌曲数量 |
+| enable_cache | bool | true | 是否启用缓存 |
+| trigger_probability | int | 100 | 触发概率 (1-100) |
+
+## 使用方法
+
+### 自动接歌
+
+当用户发送的消息包含歌词时，插件会自动识别并接下一句：
+
+```
+用户: 我曾难自拔于世界之大
+Bot: 也沉溺于其中梦话
+
+   ♪ 起风了 - 买辣椒也用券
+```
+
+### 指令
+
+- `/lyrics_stats` - 查看插件统计信息
+- `/lyrics_clear` - 清空缓存（仅管理员）
+
+## 工作原理
+
+1. **消息监听**：监听所有消息（群聊和私聊）
+2. **歌词检测**：当消息长度 ≥ 最小匹配长度时触发
+3. **缓存检查**：先查找本地缓存，避免重复请求
+4. **API 搜索**：
+   - 调用搜索接口查找歌曲
+   - 获取歌词信息
+   - 解析歌词找到下一句
+5. **结果返回**：发送下一句歌词和歌曲信息
+6. **缓存更新**：将结果保存到本地缓存
+
+## 缓存机制
+
+- 使用 MD5 哈希作为缓存键，确保唯一性
+- 缓存文件保存在 `data/lyrics_cache/lyrics_cache.json`
+- 超过最大缓存数量时自动清理旧数据
+- 支持手动清空缓存
+
+## 注意事项
+
+1. **API 限制**：请注意 API 的请求频率限制
+2. **匹配精度**：短歌词可能匹配到错误的歌曲
+3. **触发概率**：建议在群聊中降低触发概率，避免过于频繁
+4. **性能影响**：缓存功能可以显著减少 API 请求和响应时间
+
+## 示例配置
+
+```json
+{
+  "api_base_url": "https://netease-cloud-music-api.vercel.app",
+  "min_match_length": 6,
+  "max_cache_size": 500,
+  "enable_cache": true,
+  "trigger_probability": 80
+}
+```
+
+## 常见问题
+
+**Q: 为什么没有自动接歌？**
+- 检查消息长度是否 ≥ 最小匹配长度
+- 检查触发概率设置
+- 查看日志确认 API 是否正常
+
+**Q: 接歌不准确怎么办？**
+- 增加最小匹配长度
+- 发送更完整的歌词片段
+
+**Q: API 请求失败？**
+- 检查 API 地址是否正确
+- 确认 API 服务是否正常运行
+- 查看网络连接状态
+
+## 开发信息
+
+- 版本: 1.0.0
+- 作者: YourName
+- 依赖: aiohttp
+
+## 许可证
+
+MIT License
