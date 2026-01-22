@@ -93,7 +93,7 @@ class NeteaseLyricsAPI:
     "网易云歌词接龙插件（完整版）",
     "2.0.0"
 )
-class LyricsCompletePlugin(star.Star):
+class Main(star.Star):
     """网易云歌词接龙插件完整版"""
     
     def __init__(self, context, config=None):
@@ -192,3 +192,137 @@ class LyricsCompletePlugin(star.Star):
             "song_name": song_name,
             "artist": artist
         }
+
+    @filter.command("接歌词", alias={"歌词接龙", "lyrics", "jl"}, priority=80)
+    async def cmd_lyrics_complete(self, event: AstrMessageEvent, keyword: str = ""):
+        """手动触发歌词接龙命令"""
+        try:
+            if not keyword.strip():
+                await event.send(MessageChain([Plain("请提供一句歌词，我来接下一句~\n例如：/接歌词 天青色等烟雨")]))
+                return
+                
+            event.stop_event()
+            
+            if not self.api:
+                await event.send(MessageChain([Plain("插件未正确初始化，请联系管理员检查配置")]))
+                return
+            
+            # 搜索歌曲
+            song_data = await self.api.search_song_by_lyrics(keyword.strip())
+            if not song_data:
+                error_msg = "抱歉，没有找到包含" + keyword + "的歌曲呢..."
+                await event.send(MessageChain([Plain(error_msg)]))
+                return
+                
+            # 获取歌词
+            song_id = song_data.get("id")
+            lyrics = await self.api.get_lyrics(song_id)
+            if not lyrics:
+                await event.send(MessageChain([Plain("抱歉，没有找到这首歌的歌词呢...")]))
+                return
+                
+            # 匹配歌词
+            next_line = self._match_lyrics(keyword.strip(), lyrics)
+            if next_line:
+                # 缓存结果
+                if self.config["enable_cache"]:
+                    self.lyric_cache[keyword.strip()] = lyrics
+                    # 限制缓存大小
+                    if len(self.lyric_cache) > self.config["max_cache_size"]:
+                        # 移除最旧的缓存项
+                        oldest_key = next(iter(self.lyric_cache))
+                        del self.lyric_cache[oldest_key]
+                
+                # 发送回复
+                await event.send(MessageChain([Plain(f"下一句是：{next_line}")]))
+                
+                # 记录日志
+                song_info = self._extract_song_info(song_data)
+                logger.info(f"[歌词插件] 命令触发成功: '{keyword}' -> '{next_line}' "
+                           f"(歌曲: {song_info['song_name']} - {song_info['artist']})")
+            else:
+                no_result_msg = "抱歉，在" + keyword + "后面没有找到下一句歌词呢..."
+                await event.send(MessageChain([Plain(no_result_msg)]))
+                
+        except Exception as e:
+            logger.error(f"[歌词插件] 命令处理出错: {e}")
+            await event.send(MessageChain([Plain("处理请求时出错了，请稍后再试...")]))
+
+    @filter.event_message_type(filter.EventMessageType.MESSAGE)
+    async def on_message(self, event: AstrMessageEvent):
+        """监听所有消息事件，处理歌词接龙"""
+        try:
+            message_text = event.message_str.strip()
+            
+            # 跳过空消息
+            if not message_text:
+                return
+                
+            # 跳过命令消息
+            if message_text.startswith(('/', '！', '!', '。', '.')):
+                return
+                
+            # 检查消息长度
+            if len(message_text) < self.config["search_min_length"]:
+                return
+            
+            # 检查触发概率
+            import random
+            if random.randint(1, 100) > self.config["trigger_probability"]:
+                return
+            
+            # 首先检查缓存
+            cache_key = message_text
+            if self.config["enable_cache"] and cache_key in self.lyric_cache:
+                cached_lyrics = self.lyric_cache[cache_key]
+                next_line = self._match_lyrics(message_text, cached_lyrics)
+                
+                if next_line:
+                    event.stop_event()
+                    await event.send(MessageChain([Plain(next_line)]))
+                    logger.info(f"[歌词插件] 缓存匹配成功: '{message_text}' -> '{next_line}'")
+                    return
+            
+            # 如果缓存中没有，调用API搜索
+            if not self.api:
+                logger.warning("[歌词插件] API未初始化")
+                return
+                
+            # 搜索歌曲
+            song_data = await self.api.search_song_by_lyrics(message_text)
+            if not song_data:
+                return
+                
+            # 获取歌词
+            song_id = song_data.get("id")
+            if not song_id:
+                return
+                
+            lyrics = await self.api.get_lyrics(song_id)
+            if not lyrics:
+                return
+                
+            # 匹配歌词
+            next_line = self._match_lyrics(message_text, lyrics)
+            if next_line:
+                # 缓存结果
+                if self.config["enable_cache"]:
+                    self.lyric_cache[cache_key] = lyrics
+                    # 限制缓存大小
+                    if len(self.lyric_cache) > self.config["max_cache_size"]:
+                        # 移除最旧的缓存项
+                        oldest_key = next(iter(self.lyric_cache))
+                        del self.lyric_cache[oldest_key]
+                
+                # 发送回复
+                event.stop_event()
+                await event.send(MessageChain([Plain(next_line)]))
+                
+                # 记录日志
+                song_info = self._extract_song_info(song_data)
+                logger.info(f"[歌词插件] 歌词接龙成功: '{message_text}' -> '{next_line}' "
+                           f"(歌曲: {song_info['song_name']} - {song_info['artist']})")
+                
+        except Exception as e:
+            logger.error(f"[歌词插件] 处理消息事件出错: {e}")
+            # 不要停止事件传播，避免影响其他插件
