@@ -188,12 +188,12 @@ class Main(star.Star):
                     song_name=song_name
                 )
                 
-                # Silently trigger LLM by sending the prompt
-                # No user notification, just direct LLM trigger
-                await event.send(MessageChain([Plain(prompt)]))
+                # Silently trigger LLM using current personality
+                # Use reply() to leverage the default personality of current conversation
+                await event.reply(MessageChain([Plain(prompt)]))
                 
                 # Log the trigger
-                logger.info(f"Lyric Trigger plugin: 已静默触发LLM回复，歌曲: {song_name}, 歌词: {matched_line} -> {next_line}")
+                logger.info(f"Lyric Trigger plugin: 已静默触发LLM回复（使用当前人格），歌曲: {song_name}, 歌词: {matched_line} -> {next_line}")
             else:
                 # No match found
                 error_msg = f"❌ 未找到匹配的歌词。\n\n可能的原因：\n• 相似度低于阈值（当前：{self.config['similarity_threshold']})\n• 未在搜索结果中找到匹配歌曲\n• 歌词内容可能不够独特\n\n建议：尝试更长的歌词片段或调整配置参数。"
