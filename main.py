@@ -11,7 +11,8 @@ import urllib.parse
 from typing import Dict, Any, Optional, Tuple
 from difflib import SequenceMatcher
 
-from astrbot.api import star, logger
+from astrbot.api import star
+from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, filter, MessageChain
 from astrbot.api.message_components import Plain
 
@@ -35,8 +36,14 @@ class NeteaseLyricsAPI:
                     return []
                 data = await r.json()
                 return data.get("result", {}).get("songs", [])
+        except aiohttp.ClientError as e:
+            logger.error(f"Netease API search client error: {e}")
+            return []
+        except asyncio.TimeoutError as e:
+            logger.error(f"Netease API search timeout: {e}")
+            return []
         except Exception as e:
-            logger.error(f"Netease API search error: {e}")
+            logger.error(f"Netease API search unexpected error: {e}")
             return []
 
     async def get_lyrics(self, song_id: int) -> Optional[Dict[str, Any]]:
@@ -53,11 +60,17 @@ class NeteaseLyricsAPI:
                 if data.get("lrc") and data["lrc"].get("lyric"):
                     return data
                 return None
+        except aiohttp.ClientError as e:
+            logger.error(f"Netease API lyrics client error: {e}")
+            return None
+        except asyncio.TimeoutError as e:
+            logger.error(f"Netease API lyrics timeout: {e}")
+            return None
         except Exception as e:
-            logger.error(f"Netease API lyrics error: {e}")
+            logger.error(f"Netease API lyrics unexpected error: {e}")
             return None
 
-    def parse_lyrics(self, lyric_text: str) -> list:
+    def parse_lyrics(self, lyric_text: str) -> list[str]:
         """Parse lyrics text into lines, removing timestamps."""
         if not lyric_text:
             return []
@@ -75,26 +88,58 @@ class Main(star.Star):
     """
     Lyric Trigger Plugin Main Class
     """
+    
+    # Command prefixes for lyric matching
+    COMMAND_PREFIXES = ["/歌词匹配", "/lyric", "/匹配歌词", "/lyricmatch"]
+    
+    # Default configuration values
+    DEFAULT_API_URL = "http://127.0.0.1:3000"
+    DEFAULT_SIMILARITY_THRESHOLD = 0.6
+    DEFAULT_MAX_SEARCH_RESULTS = 5
+    DEFAULT_TRIGGER_PROMPT = "歌词：'{lyric}'，下一句是：'{next_line}'。请输出后半句歌词，并简短地表达你的情感。"
 
     def __init__(self, context, config: Optional[Dict[str, Any]] = None):
         super().__init__(context)
         self.context = context
         self.config = config or {}
         
-        # Default configuration
-        self.config.setdefault("api_url", "http://127.0.0.1:3000")
-        self.config.setdefault("similarity_threshold", 0.6)
-        self.config.setdefault("max_search_results", 5)
-        self.config.setdefault("trigger_prompt", "歌词：'{lyric}'，下一句是：'{next_line}'。请输出后半句歌词，并简短地表达你的情感。")
-        
-        # Show warning if using default API URL
-        if self.config["api_url"] == "http://127.0.0.1:3000":
-            logger.warning("Lyric Trigger plugin: 使用默认API URL (127.0.0.1:3000)，请在配置中修改如果您的API服务在其他地址")
+        # Validate and set configuration
+        self._validate_and_set_config()
         
         self.http_session: Optional[aiohttp.ClientSession] = None
         self.api: Optional[NeteaseLyricsAPI] = None
     
-    def safe_format_prompt(self, template: str, **kwargs) -> str:
+    def _validate_and_set_config(self):
+        """Validate and set configuration parameters."""
+        # API URL
+        api_url = self.config.get("api_url", self.DEFAULT_API_URL)
+        if not isinstance(api_url, str) or not api_url.startswith(("http://", "https://")):
+            raise ValueError("api_url 必须是有效的 HTTP/HTTPS URL")
+        self.config["api_url"] = api_url
+        
+        # Similarity threshold (0.0 to 1.0)
+        threshold = self.config.get("similarity_threshold", self.DEFAULT_SIMILARITY_THRESHOLD)
+        if not isinstance(threshold, (int, float)) or not (0.0 <= threshold <= 1.0):
+            raise ValueError("similarity_threshold 必须是 0.0 到 1.0 之间的数字")
+        self.config["similarity_threshold"] = float(threshold)
+        
+        # Max search results (positive integer)
+        max_results = self.config.get("max_search_results", self.DEFAULT_MAX_SEARCH_RESULTS)
+        if not isinstance(max_results, int) or max_results < 1:
+            raise ValueError("max_search_results 必须是正整数")
+        self.config["max_search_results"] = max_results
+        
+        # Trigger prompt
+        trigger_prompt = self.config.get("trigger_prompt", self.DEFAULT_TRIGGER_PROMPT)
+        if not isinstance(trigger_prompt, str) or not trigger_prompt.strip():
+            raise ValueError("trigger_prompt 必须是非空字符串")
+        self.config["trigger_prompt"] = trigger_prompt
+        
+        # Show warning if using default API URL
+        if self.config["api_url"] == self.DEFAULT_API_URL:
+            logger.warning("Lyric Trigger plugin: 使用默认API URL (127.0.0.1:3000)，请在配置中修改如果您的API服务在其他地址")
+    
+    def safe_format_prompt(self, template: str, **kwargs: Any) -> str:
         """Safely format prompt template with provided values, ignoring missing placeholders."""
         try:
             # Use string.Formatter to safely handle missing keys
@@ -125,8 +170,11 @@ class Main(star.Star):
             logger.info("Lyric Trigger plugin: HTTP session 已关闭")
         await super().terminate()
 
-    def _calculate_similarity_sync(self, str1: str, str2: str) -> float:
-        """Synchronous version of similarity calculation."""
+    def calculate_similarity(self, str1: str, str2: str) -> float:
+        """Calculate similarity between two strings using SequenceMatcher.
+        
+        This is a lightweight CPU operation that doesn't need to be run in a thread pool.
+        """
         if not str1 or not str2:
             return 0.0
         
@@ -138,12 +186,6 @@ class Main(star.Star):
             return 0.0
             
         return SequenceMatcher(None, str1_clean, str2_clean).ratio()
-    
-    async def calculate_similarity(self, str1: str, str2: str) -> float:
-        """Calculate similarity between two strings using SequenceMatcher (async)."""
-        # Run the CPU-intensive calculation in a thread pool to avoid blocking event loop
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._calculate_similarity_sync, str1, str2)
 
     async def find_matching_lyric(self, user_text: str) -> Optional[Tuple[str, str, str, int]]:
         """
@@ -178,7 +220,7 @@ class Main(star.Star):
             
             # Find matching line
             for i, line in enumerate(lines[:-1]):  # Don't check the last line
-                similarity = await self.calculate_similarity(user_text, line)
+                similarity = self.calculate_similarity(user_text, line)
                 
                 if similarity >= self.config["similarity_threshold"]:
                     next_line = lines[i + 1]
@@ -186,20 +228,70 @@ class Main(star.Star):
         
         return None
 
+    def _extract_lyric_from_command(self, message: str) -> str:
+        """Extract lyric content from command message."""
+        # Remove command prefix to get lyric content
+        # Sort prefixes by length (descending) to match longest first
+        lyric_text = message
+        sorted_prefixes = sorted(self.COMMAND_PREFIXES, key=len, reverse=True)
+        for prefix in sorted_prefixes:
+            if message.startswith(prefix):
+                lyric_text = message[len(prefix):].strip()
+                break
+        return lyric_text
+    
+    async def _get_llm_response(self, event: AstrMessageEvent, prompt: str, song_name: str, 
+                               matched_line: str, next_line: str) -> bool:
+        """Get LLM response and send it to user."""
+        try:
+            # Get current chat provider ID for this session
+            umo = event.unified_msg_origin
+            provider_id = await self.context.get_current_chat_provider_id(umo=umo)
+            
+            if not provider_id:
+                await event.send(MessageChain([Plain("❌ 无法获取当前会话的LLM配置，请确保已配置LLM提供商。")]))
+                return False
+            
+            # Get the default persona for this session using persona_manager
+            persona_mgr = self.context.persona_manager
+            persona_v3 = await persona_mgr.get_default_persona_v3(umo=umo)
+            
+            # Extract system prompt from persona v3 format
+            system_prompt = None
+            if persona_v3 and 'prompt' in persona_v3:
+                system_prompt = persona_v3['prompt']
+                logger.info(f"Lyric Trigger plugin: 使用当前会话人格 - {persona_v3.get('name', '默认人格')}")
+            else:
+                logger.info("Lyric Trigger plugin: 未找到自定义人格，使用默认配置")
+            
+            # Use llm_generate for all calls, with or without system_prompt
+            logger.debug(f"Lyric Trigger plugin: 人格系统提示词 - {system_prompt[:30] if system_prompt else '默认'}")
+            llm_resp = await self.context.llm_generate(
+                chat_provider_id=provider_id,
+                prompt=prompt,  # This is the trigger_prompt with lyric data
+                system_prompt=system_prompt,  # This is from persona (or None for default)
+            )
+            
+            # Send LLM's response
+            if llm_resp and llm_resp.completion_text:
+                await event.send(MessageChain([Plain(llm_resp.completion_text)]))
+                logger.info(f"Lyric Trigger plugin: 已触发LLM回复（使用当前人格），歌曲: {song_name}, 歌词: {matched_line} -> {next_line}")
+                return True
+            else:
+                await event.send(MessageChain([Plain("❌ LLM未返回有效回复。")]))
+                return False
+        except Exception as llm_error:
+            logger.error(f"Lyric Trigger plugin: LLM调用失败: {llm_error}")
+            await event.send(MessageChain([Plain(f"❌ LLM调用失败：{str(llm_error)}")]))
+            return False
+    
     @filter.command("歌词匹配", alias={"lyric", "匹配歌词", "lyricmatch"}, priority=100)
     async def cmd_lyric_match(self, event: AstrMessageEvent):
         """指令触发歌词匹配和AI回复。使用方法：/歌词匹配 <歌词内容>"""
         event.stop_event()
         
-        # Get full message text and extract lyric content
-        full_message = event.message_str
-        
-        # Remove command prefix to get lyric content
-        lyric_text = full_message
-        for prefix in ["/歌词匹配", "/lyric", "/匹配歌词", "/lyricmatch"]:
-            if full_message.startswith(prefix):
-                lyric_text = full_message[len(prefix):].strip()
-                break
+        # Extract lyric content from command
+        lyric_text = self._extract_lyric_from_command(event.message_str)
         
         # Check if lyric text is provided
         if not lyric_text:
@@ -224,56 +316,8 @@ class Main(star.Star):
                     song_name=song_name
                 )
                 
-                # Get current chat provider ID for this session
-                umo = event.unified_msg_origin
-                provider_id = await self.context.get_current_chat_provider_id(umo=umo)
-                
-                if not provider_id:
-                    await event.send(MessageChain([Plain("❌ 无法获取当前会话的LLM配置，请确保已配置LLM提供商。")]))
-                    return
-                
-                # Call LLM to generate response using the current session's default persona
-                # This ensures the response follows the current personality settings
-                try:
-                    # Get the default persona for this session using persona_manager
-                    persona_mgr = self.context.persona_manager
-                    persona_v3 = await persona_mgr.get_default_persona_v3(umo=umo)
-                    
-                    # Extract system prompt from persona v3 format
-                    system_prompt = None
-                    if persona_v3 and 'prompt' in persona_v3:
-                        system_prompt = persona_v3['prompt']
-                        logger.info(f"Lyric Trigger plugin: 使用当前会话人格 - {persona_v3.get('name', '默认人格')}")
-                    
-                    # If system prompt is available, use llm_generate with it
-                    if system_prompt:
-                        logger.debug(f"Lyric Trigger plugin: 人格系统提示词 - {system_prompt[:30]}...")
-                        # Use the trigger_prompt as user prompt, system_prompt from persona
-                        llm_resp = await self.context.llm_generate(
-                            chat_provider_id=provider_id,
-                            prompt=prompt,  # This is the trigger_prompt with lyric data
-                            system_prompt=system_prompt,  # This is from persona
-                        )
-                    else:
-                        # Fallback to tool_loop_agent if no persona found
-                        logger.info("Lyric Trigger plugin: 未找到自定义人格，使用默认配置")
-                        llm_resp = await self.context.tool_loop_agent(
-                            event=event,
-                            chat_provider_id=provider_id,
-                            prompt=prompt,
-                            tools=None,  # No tools needed for this simple lyric response
-                            max_steps=1,  # Single LLM call, no tool loops needed
-                        )
-                    
-                    # Send LLM's response
-                    if llm_resp and llm_resp.completion_text:
-                        await event.send(MessageChain([Plain(llm_resp.completion_text)]))
-                        logger.info(f"Lyric Trigger plugin: 已触发LLM回复（使用当前人格），歌曲: {song_name}, 歌词: {matched_line} -> {next_line}")
-                    else:
-                        await event.send(MessageChain([Plain("❌ LLM未返回有效回复。")]))
-                except Exception as llm_error:
-                    logger.error(f"Lyric Trigger plugin: LLM调用失败: {llm_error}")
-                    await event.send(MessageChain([Plain(f"❌ LLM调用失败：{str(llm_error)}")]))
+                # Get LLM response and send it
+                await self._get_llm_response(event, prompt, song_name, matched_line, next_line)
             else:
                 # No match found
                 error_msg = f"❌ 未找到匹配的歌词。\n\n可能的原因：\n• 相似度低于阈值（当前：{self.config['similarity_threshold']})\n• 未在搜索结果中找到匹配歌曲\n• 歌词内容可能不够独特\n\n建议：尝试更长的歌词片段或调整配置参数。"
@@ -281,6 +325,3 @@ class Main(star.Star):
         except Exception as e:
             logger.error(f"Lyric Trigger plugin: 处理失败: {e}")
             await event.send(MessageChain([Plain(f"处理失败：{str(e)}")]))
-        finally:
-            # Clean up processing message if needed
-            pass
