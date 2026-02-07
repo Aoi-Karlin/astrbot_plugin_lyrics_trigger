@@ -85,7 +85,7 @@ class Main(star.Star):
         self.config.setdefault("api_url", "http://127.0.0.1:3000")
         self.config.setdefault("similarity_threshold", 0.6)
         self.config.setdefault("max_search_results", 5)
-        self.config.setdefault("trigger_prompt", "用户输入了歌词：'{lyric}'，下一句是：'{next_line}'。请根据这两句歌词进行回应，可以：\n1. 继续接唱\n2. 评论这两句歌词\n3. 表达相关的情感或联想\n请用自然、富有情感的方式回复，不要超过两句话。")
+        self.config.setdefault("trigger_prompt", "歌词：'{lyric}'，下一句是：'{next_line}'。请输出后半句歌词，并简短地表达你的情感。")
         
         # Show warning if using default API URL
         if self.config["api_url"] == "http://127.0.0.1:3000":

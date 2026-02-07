@@ -26,7 +26,7 @@
     "type": "string",
     "label": "触发提示词",
     "description": "当匹配到歌词时，发送给LLM的提示词模板。可用变量：{lyric}（当前歌词）、{next_line}（下一句歌词）、{song_name}（歌曲名）",
-    "default": "用户输入了歌词：'{lyric}'，下一句是：'{next_line}'。请根据这两句歌词进行回应，可以：\n1. 继续接唱\n2. 评论这两句歌词\n3. 表达相关的情感或联想\n请用自然、富有情感的方式回复，不要超过两句话。",
+    "default": "歌词：'{lyric}'，下一句是：'{next_line}'。请输出后半句歌词，并简短地表达你的情感。",
     "multiline": true
   }
 }
