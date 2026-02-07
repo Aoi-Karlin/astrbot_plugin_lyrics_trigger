@@ -12,8 +12,8 @@ from typing import Dict, Any, Optional, Tuple
 from difflib import SequenceMatcher
 
 from astrbot.api import star, logger
-from astrbot.api.event import AstrMessageEvent, filter
-from astrbot.api.message_components import Plain, MessageChain
+from astrbot.api.event import AstrMessageEvent, filter, MessageChain
+from astrbot.api.message_components import Plain
 
 
 class NeteaseLyricsAPI:
