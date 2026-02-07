@@ -5,6 +5,7 @@ Lyric Trigger Plugin for AstrBot
 """
 
 import re
+import asyncio
 import aiohttp
 import urllib.parse
 from typing import Dict, Any, Optional, Tuple
@@ -12,8 +13,7 @@ from difflib import SequenceMatcher
 
 from astrbot.api import star, logger
 from astrbot.api.event import AstrMessageEvent, filter
-from astrbot.core.message.message_event_result import MessageChain
-from astrbot.api.message_components import Plain
+from astrbot.api.message_components import Plain, MessageChain
 
 
 class NeteaseLyricsAPI:
@@ -93,6 +93,24 @@ class Main(star.Star):
         
         self.http_session: Optional[aiohttp.ClientSession] = None
         self.api: Optional[NeteaseLyricsAPI] = None
+    
+    def safe_format_prompt(self, template: str, **kwargs) -> str:
+        """Safely format prompt template with provided values, ignoring missing placeholders."""
+        try:
+            # Use string.Formatter to safely handle missing keys
+            from string import Formatter
+            
+            # Get all placeholder fields from template
+            fields = [field_name for _, field_name, _, _ in Formatter().parse(template) if field_name]
+            
+            # Only include kwargs that exist in template
+            valid_kwargs = {k: v for k, v in kwargs.items() if k in fields}
+            
+            # Format with valid kwargs only
+            return template.format(**valid_kwargs)
+        except Exception as e:
+            logger.warning(f"Lyric Trigger plugin: 提示词格式化失败，使用原始模板: {e}")
+            return template
 
     async def initialize(self):
         """Initialize the plugin."""
@@ -107,8 +125,8 @@ class Main(star.Star):
             logger.info("Lyric Trigger plugin: HTTP session 已关闭")
         await super().terminate()
 
-    def calculate_similarity(self, str1: str, str2: str) -> float:
-        """Calculate similarity between two strings using SequenceMatcher."""
+    def _calculate_similarity_sync(self, str1: str, str2: str) -> float:
+        """Synchronous version of similarity calculation."""
         if not str1 or not str2:
             return 0.0
         
@@ -120,6 +138,12 @@ class Main(star.Star):
             return 0.0
             
         return SequenceMatcher(None, str1_clean, str2_clean).ratio()
+    
+    async def calculate_similarity(self, str1: str, str2: str) -> float:
+        """Calculate similarity between two strings using SequenceMatcher (async)."""
+        # Run the CPU-intensive calculation in a thread pool to avoid blocking event loop
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._calculate_similarity_sync, str1, str2)
 
     async def find_matching_lyric(self, user_text: str) -> Optional[Tuple[str, str, str, int]]:
         """
@@ -154,7 +178,7 @@ class Main(star.Star):
             
             # Find matching line
             for i, line in enumerate(lines[:-1]):  # Don't check the last line
-                similarity = self.calculate_similarity(user_text, line)
+                similarity = await self.calculate_similarity(user_text, line)
                 
                 if similarity >= self.config["similarity_threshold"]:
                     next_line = lines[i + 1]
@@ -163,18 +187,28 @@ class Main(star.Star):
         return None
 
     @filter.command("歌词匹配", alias={"lyric", "匹配歌词", "lyricmatch"}, priority=100)
-    async def cmd_lyric_match(self, event: AstrMessageEvent, lyric_text: str):
+    async def cmd_lyric_match(self, event: AstrMessageEvent):
         """指令触发歌词匹配和AI回复。使用方法：/歌词匹配 <歌词内容>"""
         event.stop_event()
         
+        # Get full message text and extract lyric content
+        full_message = event.message_str
+        
+        # Remove command prefix to get lyric content
+        lyric_text = full_message
+        for prefix in ["/歌词匹配", "/lyric", "/匹配歌词", "/lyricmatch"]:
+            if full_message.startswith(prefix):
+                lyric_text = full_message[len(prefix):].strip()
+                break
+        
         # Check if lyric text is provided
-        if not lyric_text.strip():
+        if not lyric_text:
             await event.send(MessageChain([Plain("请提供要匹配的歌词内容。\n使用方法：/歌词匹配 <歌词内容>\n例如：/歌词匹配 天青色等烟雨")]))
             return
         
         try:
             # Try to find matching lyrics
-            result = await self.find_matching_lyric(lyric_text.strip())
+            result = await self.find_matching_lyric(lyric_text)
             
             if result:
                 song_name, matched_line, next_line, song_id = result
@@ -183,7 +217,8 @@ class Main(star.Star):
                 
                 # Prepare the prompt for LLM
                 prompt_template = self.config.get("trigger_prompt", "")
-                prompt = prompt_template.format(
+                prompt = self.safe_format_prompt(
+                    prompt_template,
                     lyric=matched_line,
                     next_line=next_line,
                     song_name=song_name
