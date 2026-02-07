@@ -1,6 +1,6 @@
 """
 Lyric Trigger Plugin for AstrBot
-- Author: User
+- Author: Azured
 - Features: Automatically triggers LLM response when lyrics are detected, sending the next line to AI.
 """
 
@@ -96,7 +96,7 @@ class Main(star.Star):
     DEFAULT_API_URL = "http://127.0.0.1:3000"
     DEFAULT_SIMILARITY_THRESHOLD = 0.6
     DEFAULT_MAX_SEARCH_RESULTS = 5
-    DEFAULT_TRIGGER_PROMPT = "歌词：'{lyric}'，下一句是：'{next_line}'。请输出后半句歌词，并简短地表达你的情感。"
+    DEFAULT_TRIGGER_PROMPT = "歌词：'{lyric}'，下一句是：'{next_line}'。请输出后半句歌词，并简短地表达你的情感。注意应将后半句歌词中的空格换为其他正常表达使用的标点符号，而不是空格。"
 
     def __init__(self, context, config: Optional[Dict[str, Any]] = None):
         super().__init__(context)
