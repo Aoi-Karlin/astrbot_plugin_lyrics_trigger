@@ -26,7 +26,7 @@
     "type": "string",
     "label": "触发提示词",
     "description": "当匹配到歌词时，发送给LLM的提示词模板。可用变量：{lyric}（当前歌词）、{next_line}（下一句歌词）、{song_name}（歌曲名）",
-    "default": "歌词：'{lyric}'，下一句是：'{next_line}'。请输出后半句歌词，并简短地表达你的情感。",
+    "default": "歌词：'{lyric}'，下一句是：'{next_line}'。请输出后半句歌词，并简短地表达你的情感。注意应将后半句歌词中的空格换为其他正常表达使用的标点符号，而不是空格。",
     "multiline": true
   }
 }
