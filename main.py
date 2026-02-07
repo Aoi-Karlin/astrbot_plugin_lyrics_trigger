@@ -197,16 +197,38 @@ class Main(star.Star):
                     await event.send(MessageChain([Plain("❌ 无法获取当前会话的LLM配置，请确保已配置LLM提供商。")]))
                     return
                 
-                # Call LLM to generate response using tool_loop_agent to preserve personality
-                # This will use the current session's system prompt and tools
+                # Call LLM to generate response using the current session's default persona
+                # This ensures the response follows the current personality settings
                 try:
-                    llm_resp = await self.context.tool_loop_agent(
-                        event=event,
-                        chat_provider_id=provider_id,
-                        prompt=prompt,
-                        tools=None,  # No tools needed for this simple lyric response
-                        max_steps=1,  # Single LLM call, no tool loops needed
-                    )
+                    # Get the default persona for this session using persona_manager
+                    persona_mgr = self.context.persona_manager
+                    persona = persona_mgr.get_default_persona(umo=umo)
+                    
+                    # Extract system prompt from persona
+                    system_prompt = None
+                    if persona and hasattr(persona, 'system_prompt'):
+                        system_prompt = persona.system_prompt
+                        logger.info(f"Lyric Trigger plugin: 使用当前会话人格 - {persona.persona_id}")
+                    
+                    # If system prompt is available, use llm_generate with it
+                    if system_prompt:
+                        logger.debug(f"Lyric Trigger plugin: 人格系统提示词 - {system_prompt[:30]}...")
+                        # Use the trigger_prompt as user prompt, system_prompt from persona
+                        llm_resp = await self.context.llm_generate(
+                            chat_provider_id=provider_id,
+                            prompt=prompt,  # This is the trigger_prompt with lyric data
+                            system_prompt=system_prompt,  # This is from persona
+                        )
+                    else:
+                        # Fallback to tool_loop_agent if no persona found
+                        logger.info("Lyric Trigger plugin: 未找到自定义人格，使用默认配置")
+                        llm_resp = await self.context.tool_loop_agent(
+                            event=event,
+                            chat_provider_id=provider_id,
+                            prompt=prompt,
+                            tools=None,  # No tools needed for this simple lyric response
+                            max_steps=1,  # Single LLM call, no tool loops needed
+                        )
                     
                     # Send LLM's response
                     if llm_resp and llm_resp.completion_text:
