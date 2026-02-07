@@ -202,13 +202,13 @@ class Main(star.Star):
                 try:
                     # Get the default persona for this session using persona_manager
                     persona_mgr = self.context.persona_manager
-                    persona = persona_mgr.get_default_persona(umo=umo)
+                    persona_v3 = persona_mgr.get_default_persona_v3(umo=umo)
                     
-                    # Extract system prompt from persona
+                    # Extract system prompt from persona v3 format
                     system_prompt = None
-                    if persona and hasattr(persona, 'system_prompt'):
-                        system_prompt = persona.system_prompt
-                        logger.info(f"Lyric Trigger plugin: 使用当前会话人格 - {persona.persona_id}")
+                    if persona_v3 and 'prompt' in persona_v3:
+                        system_prompt = persona_v3['prompt']
+                        logger.info(f"Lyric Trigger plugin: 使用当前会话人格 - {persona_v3.get('name', '默认人格')}")
                     
                     # If system prompt is available, use llm_generate with it
                     if system_prompt:
