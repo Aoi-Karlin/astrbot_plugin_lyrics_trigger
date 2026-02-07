@@ -202,7 +202,7 @@ class Main(star.Star):
                 try:
                     # Get the default persona for this session using persona_manager
                     persona_mgr = self.context.persona_manager
-                    persona_v3 = persona_mgr.get_default_persona_v3(umo=umo)
+                    persona_v3 = await persona_mgr.get_default_persona_v3(umo=umo)
                     
                     # Extract system prompt from persona v3 format
                     system_prompt = None
